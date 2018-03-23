@@ -16,6 +16,12 @@ enum SAMLProtocol {
     SAMLSingleSignOn;
 }
 
+enum SamlResponseSignatureValue{
+    AssertionOnly;
+    MessageAndAssertion;
+    MessageOnly;
+}
+
 #region DSC Resource: cADFSFarm
 function InstallADFSFarm {
     <#
@@ -292,6 +298,28 @@ class cADFSFarm {
 }
 #endregion
 
+
+Function Get-CertificatesObjects {
+    <#
+    .Synopsis
+    Get a list of X509Certificate2 object from an array containing their thumbprint. It only gets certificates in the computer personal store.
+
+    .PARAMETER RequestSigningCertificate
+    An array of string containing the thumbprint of the certificate to find.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][String[]]$RequestSigningCertificate
+    )
+
+    $certificates = @()
+    $RequestSigningCertificate | ForEach-Object{
+        $thumbprint = $_
+        $certificates += Get-ChildItem -path cert:\LocalMachine\My | Where-Object{$_.thumbprint -eq $thumbprint}
+    }
+
+    return $certificates
+}
+    
 #region DSC Resource: cADFSRelyingPartyTrust
 [DscResource()]
 class cADFSRelyingPartyTrust {
@@ -341,6 +369,35 @@ class cADFSRelyingPartyTrust {
     [DscProperty()]
     [string] $AccessControlPolicyName;
 
+    ### ndicates whether the Federation Service requires signed SAML protocol requests from the relying party. If you specify a value of $True, the Federation Service rejects unsigned SAML protocol requests.
+    [DscProperty()]
+    [bool] $SignedSamlRequestsRequired
+
+    ### Specifies the thumbprint of the signing certificate
+    [DscProperty()]
+    [string[]] $SigningCertificateThumbprint;
+
+    ### Specifies the response signatures that the relying party expects.
+    [DscProperty()]
+    [SamlResponseSignatureValue] $SamlResponseSignature
+
+    ### Specifies the signature algorithm that the relying party uses for signing and verification.
+    [DscProperty()]
+    [ValidateSet("http://www.w3.org/2000/09/xmldsig#rsa-sha1","http://www.w3.org/2001/04/xmldsig-more#rsa-sha256")] 
+    [String] $SignatureAlgorithm
+
+    ### Specifies the skew, as in integer, for the time stamp that marks the beginning of the validity period
+    [DscProperty()]
+    [Int] $NotBeforeSkew
+
+    ### Indicates whether the JSON Web Token (JWT) format should be used to issue a token on a WS-Federation request. By default, SAML tokens are issued over WS-Federation.
+    [DscProperty()]
+    [bool] $EnableJWT
+
+    ### Specifies the duration, in minutes, for which the claims that are issued to the relying party are valid.
+    [DscProperty()]
+    [Int] $TokenLifetime
+
     [cADFSRelyingPartyTrust] Get() {
         $this.CheckDependencies();
 
@@ -363,6 +420,13 @@ class cADFSRelyingPartyTrust {
         $this.Notes = $RelyingPartyTrust.Notes;
         $this.Identifier = $RelyingPartyTrust.Identifier;
         $this.AccessControlPolicyName = $RelyingPartyTrust.AccessControlPolicyName;
+        $this.SignedSamlRequestsRequired = $RelyingPartyTrust.SignedSamlRequestsRequired;
+        $this.SignatureAlgorithm = $RelyingPartyTrust.SignatureAlgorithm;
+        $this.SamlResponseSignature = $RelyingPartyTrust.SamlResponseSignature;
+        $this.SigningCertificateThumbprint = $RelyingPartyTrust.RequestSigningCertificate | Foreach-object {$_.Thumbprint};
+        $this.NotBeforeSkew = $RelyingPartyTrust.NotBeforeSkew;
+        $this.EnableJWT = $RelyingPartyTrust.EnableJWT;
+        $this.TokenLifetime = $RelyingPartyTrust.TokenLifetime
 
         return $this;
     }
@@ -442,6 +506,38 @@ class cADFSRelyingPartyTrust {
             Write-Verbose -Message ('The current AccessControlPolicyName property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.AccessControlPolicyName, $this.AccessControlPolicyName);
             $Compliant = $false;
         }
+        if ($RelyingPartyTrust.SignedSamlRequestsRequired -ne $this.SignedSamlRequestsRequired) {
+            Write-Verbose -Message ('The current SignedSamlRequestsRequired property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.SignedSamlRequestsRequired, $this.SignedSamlRequestsRequired);
+            $Compliant = $false;
+        }
+        if ($RelyingPartyTrust.SamlResponseSignature -ne $this.SamlResponseSignature) {
+            Write-Verbose -Message ('The current SamlResponseSignature property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.SamlResponseSignature, $this.SamlResponseSignature);
+            $Compliant = $false;
+        }
+        if ($RelyingPartyTrust.SignatureAlgorithm -ne $this.SignatureAlgorithm) {
+            Write-Verbose -Message ('The current SignatureAlgorithm property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.SignatureAlgorithm, $this.SignatureAlgorithm);
+            $Compliant = $false;
+        }
+        
+        $certificates = Get-CertificatesObjects -ThumbprintArray $this.RequestSigningCertificate
+        if ($RelyingPartyTrust.RequestSigningCertificate -ne $certificates) {
+            Write-Verbose -Message ('The current RequestSigningCertificate property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.RequestSigningCertificate, $certificates);
+            $Compliant = $false;
+        }
+        if ($RelyingPartyTrust.NotBeforeSkew -ne $this.NotBeforeSkew) {
+            Write-Verbose -Message ('The current NotBeforeSkew property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.NotBeforeSkew, $this.NotBeforeSkew);
+            $Compliant = $false;
+        }
+        if ($RelyingPartyTrust.EnableJWT -ne $this.EnableJWT) {
+            Write-Verbose -Message ('The current EnableJWT property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.EnableJWT, $this.EnableJWT);
+            $Compliant = $false;
+        }
+        if ($RelyingPartyTrust.TokenLifetime -ne $this.TokenLifetime) {
+            Write-Verbose -Message ('The current TokenLifetime property value ({0}) does not match the desired configuration ({1}).' -f $RelyingPartyTrust.TokenLifetime, $this.TokenLifetime);
+            $Compliant = $false;
+        }
+
+        
 
         if ($Compliant) {
             Write-Verbose -Message ('ADFS Relying Party ({0}) is compliant' -f $this.Name);
@@ -454,6 +550,7 @@ class cADFSRelyingPartyTrust {
         $this.CheckDependencies();
 
         ### Build a HashTable of what the configuration settings should look like.
+        $certificates = Get-CertificatesObjects -ThumbprintArray $this.RequestSigningCertificate
         $RelyingPartyTrust = @{
             Identifier = $this.Identifier;
             IssuanceTransformRules = $this.IssuanceTransformRules;
@@ -467,6 +564,34 @@ class cADFSRelyingPartyTrust {
         ### Add the ClaimsProviderName, only if it was specified by the user.
         if ($this.ClaimsProviderName) {
             $RelyingPartyTrust.Add('ClaimsProviderName', $this.ClaimsProviderName);
+        }
+
+        if ($this.SignedSamlRequestsRequired) {
+            $RelyingPartyTrust.Add('SignedSamlRequestsRequired', $this.SignedSamlRequestsRequired);
+        }
+
+        if ($this.SignatureAlgorithm) {
+            $RelyingPartyTrust.Add('SignatureAlgorithm', $this.SignatureAlgorithm);
+        }
+
+        if ($this.SamlResponseSignature) {
+            $RelyingPartyTrust.Add('SamlResponseSignature', $this.SamlResponseSignature);
+        }
+
+        if ($certificates) {
+            $RelyingPartyTrust.Add('RequestSigningCertificate', $certificates);
+        }
+
+        if ($this.NotBeforeSkew) {
+            $RelyingPartyTrust.Add('NotBeforeSkew', $this.NotBeforeSkew);
+        }
+
+        if ($this.EnableJWT) {
+            $RelyingPartyTrust.Add('EnableJWT', $this.EnableJWT);
+        }
+
+        if ($this.TokenLifetime) {
+            $RelyingPartyTrust.Add('TokenLifetime', $this.TokenLifetime);
         }
 
         if ($this.IssuanceAuthorizationRules) {
